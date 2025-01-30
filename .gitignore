@@ -1,0 +1,74 @@
+# Model files
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.pb
+*.h5
+*.weights
+*.engine
+*.mlmodel
+models/
+
+# Environment
+venv/
+env/
+.env
+.venv
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+log/
+
+# Temporary files
+temp_*
+*.tmp
+
+# Dataset
+dataset/
+data/
+*.csv
+*.json
+*.xml
+*.txt
+
+# Cache
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local development settings
+local_settings.py
+yolov10/
