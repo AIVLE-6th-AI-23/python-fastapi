@@ -61,7 +61,6 @@ data/
 *.csv
 *.json
 *.xml
-*.txt
 
 # Cache
 .cache/
