@@ -6,6 +6,39 @@ import easyocr
 from langdetect import detect
 from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 import torch
+import os
+from azure.storage.blob import BlobServiceClient
+
+def download_model():
+    try:
+        # Blob Storage 연결 문자열로 클라이언트 생성
+        connection_string = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        
+        # 컨테이너 및 모델 경로 설정
+        container_name = 'blob1'
+        model_path = 'models/yolov10x_gestures.pt'
+        local_model_path = './yolov10x_gestures.pt'
+
+        # Blob 클라이언트 생성
+        blob_client = blob_service_client.get_blob_client(
+            container=container_name, 
+            blob=model_path
+        )
+
+        # 모델 파일 다운로드
+        print("Downloading model file...")
+        with open(local_model_path, 'wb') as model_file:
+            blob_data = blob_client.download_blob()
+            blob_data.readinto(model_file)
+        print("Model file downloaded successfully")
+        
+    except Exception as e:
+        print(f"Error downloading model: {str(e)}")
+        raise
+
+# FastAPI 앱 초기화 전에 모델 다운로드
+download_model()
 
 app = FastAPI()
 

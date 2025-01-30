@@ -8,3 +8,4 @@ ultralytics
 easyocr
 langdetect
 transformers
+azure-storage-blob
