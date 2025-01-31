@@ -71,3 +71,12 @@ htmlcov/
 # Local development settings
 local_settings.py
 yolov10/
+
+fastapi-env/
+fastapi-env\
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+
