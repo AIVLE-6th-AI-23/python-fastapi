@@ -43,7 +43,7 @@ download_model()
 app = FastAPI()
 
 # 모델 초기화
-gesture_model = YOLO('yolov10x_gestures.pt')
+gesture_model = YOLO('./yolov10x_gestures.pt')
 
 # OCR 리더 초기화 (한글, 영어 지원)
 reader = easyocr.Reader(['ko', 'en'])
