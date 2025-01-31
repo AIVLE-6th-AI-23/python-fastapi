@@ -1,3 +1,9 @@
+git clone https://github.com/THU-MIG/yolov10.git
+cd yolov10
 pip install -r requirements.txt
-pip install git+https://github.com/THU-MIG/yolov10.git
+pip install -e .
+
+cd ..
+pip install -r requirements.txt
+
 gunicorn --bind=0.0.0.0 --worker-class uvicorn.workers.UvicornWorker main:app
