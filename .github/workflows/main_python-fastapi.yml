@@ -21,7 +21,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev
+          sudo apt-get install -y libgl1 libglx-mesa0 libglib2.0-0 libsm6 libxext6 libxrender-dev
 
       - name: Install YOLOv10
         run: |
