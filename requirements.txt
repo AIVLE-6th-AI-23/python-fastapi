@@ -1,9 +1,9 @@
 fastapi
 uvicorn
 gunicorn
-torch==2.5.1
+torch==2.5.0
 torchvision==0.20.0
-opencv-python==4.9.0.80
+opencv-python-headless==4.9.0.80
 ultralytics
 easyocr
 langdetect
