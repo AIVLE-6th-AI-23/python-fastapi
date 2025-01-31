@@ -23,11 +23,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev
 
-      - name: Create and start virtual environment
-        run: |
-          python -m venv venv
-          source venv/bin/activate
-
       - name: Install YOLOv10
         run: |
           git clone https://github.com/THU-MIG/yolov10.git
@@ -36,8 +31,9 @@ jobs:
           pip install -e .
           cd ..
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install -r requirements.txt
+
 
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
