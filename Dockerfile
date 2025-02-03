@@ -1,17 +1,16 @@
 # 베이스 이미지 설정
-FROM python:3.9
-
-RUN python -m pip install --upgrade pip
-
-# 작업 디렉토리 설정
-WORKDIR /app
+FROM python:3.9-slim
 
 # 시스템 패키지 설치
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip
 
 # Python 패키지 설치
 COPY requirements.txt .

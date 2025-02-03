@@ -7,11 +7,12 @@ from langdetect import detect
 from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 import torch
 import os
+from datetime import datetime
 
 app = FastAPI()
 
 # 모델 초기화
-gesture_model = YOLO('./yolov10x_gestures.pt')
+gesture_model = YOLO('YOLOv10x_gestures.pt')
 
 # OCR 리더 초기화 (한글, 영어 지원)
 reader = easyocr.Reader(['ko', 'en'])
@@ -102,13 +103,19 @@ async def analyze_image(file: UploadFile = File(...)):
             }
             gesture_detections.append(gesture_detection)
     
-    # 통합 결과 반환
-    return {
+    content_type = "IMAGE"  # 또는 동적으로 설정
+    analysis_detail = {
         "text_analysis": text_analysis,
         "gesture_analysis": {
             "detections": gesture_detections,
             "total_gestures": len(gesture_detections)
         }
+    }
+    
+    return {
+        "contentType": content_type,
+        "analysisDetail": analysis_detail,
+        "analyzedAt": datetime.now().isoformat()
     }
 
 @app.post("/analyze/video")
@@ -173,7 +180,11 @@ async def analyze_video(file: UploadFile = File(...)):
     os.remove(temp_file)
     
     return {
-        "total_frames": frame_count,
-        "frame_analysis": frame_results
+        "contentType": "VIDEO",
+        "analysisDetail": {
+            "total_frames": frame_count,
+            "frame_analysis": frame_results
+        },
+        "analyzedAt": datetime.now().isoformat()
     }
 
