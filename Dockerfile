@@ -16,10 +16,6 @@ RUN python -m pip install --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 환경 변수 설정
-ENV PERPLEXITY_API_KEY="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"
-ENV PORT=3000
-
 # 애플리케이션 코드 복사
 COPY . .
 
@@ -28,4 +24,3 @@ EXPOSE 8000
 
 # 실행 명령어
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-# CMD ["gunicorn", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "main:app"]

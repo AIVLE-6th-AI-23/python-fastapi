@@ -10,8 +10,10 @@ import os
 from datetime import datetime
 import httpx
 from openai import OpenAI
+from dotenv import load_dotenv
 import json
 
+load_dotenv()
 app = FastAPI()
 
 # 작업 상태 추적 딕셔너리
@@ -30,7 +32,8 @@ async def update_spring_status(post_id: int, status: str, progress: float):
             print(f"상태 업데이트 실패: {e}")
 
 # 혐오표현 언어 탐지 모델
-api_key = "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"
+
+api_key = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(
     api_key=api_key,
@@ -142,6 +145,10 @@ def detect_hate_speech(text):
             
     except Exception as e:
         return {"error": str(e), "text": text}
+
+@app.get("/test")
+async def test_connection():
+    return {"status": "success", "message": "FastAPI 서버가 정상적으로 응답했습니다."}
 
 @app.post("/analyze/text/{post_id}")
 async def analyze_text(post_id: int, text: str):
