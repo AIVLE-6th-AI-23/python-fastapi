@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-gunicorn
 opencv-python-headless==4.9.0.80
 ultralytics
 easyocr
@@ -22,3 +21,7 @@ py-cpuinfo==9.0.0
 huggingface-hub==0.23.2
 safetensors==0.4.3
 datetime
+httpx
+openai
+# python-multipart
+# gunicorn
