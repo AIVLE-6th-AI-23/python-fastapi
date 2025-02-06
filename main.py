@@ -16,23 +16,16 @@ import json
 load_dotenv()
 app = FastAPI()
 
-# 작업 상태 추적 딕셔너리
-task_status = {}
-
 # spring boot 서버에 상태 업데이트
-async def update_spring_status(post_id: int, status: str, progress: float):
+async def update_spring_status(post_id: int, status: str, progress: int):
     async with httpx.AsyncClient() as client:
         try:
-            url = f"/api/posts/{post_id}/status"
-            await client.patch(url, json={
-                "status": status,
-                "progress": progress
-            })
+            url = f"http://localhost:8080/{post_id}/status/{status}-{progress}"
+            await client.patch(url)
         except Exception as e:
             print(f"상태 업데이트 실패: {e}")
 
 # 혐오표현 언어 탐지 모델
-
 api_key = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(
@@ -154,63 +147,49 @@ async def test_connection():
 async def analyze_text(post_id: int, text: str):
     try:
         # 초기 상태 설정
-        task_status[post_id] = {"progress": 0, "status": "PROCESSING"}
-        await update_spring_status(post_id, "PROCESSING", 0)
+        await update_spring_status(post_id, "START", 0)
         
         # 텍스트 분석 시작 (50% 진행)
         await update_spring_status(post_id, "PROCESSING", 50)
         text_analysis = detect_hate_speech(text)
         
-        # 최종 결과 생성 (90% 진행)
+        # 텍스트 분석 완료 (90% 진행)
         await update_spring_status(post_id, "PROCESSING", 90)
-        # content_type = "TEXT"
-        # analysis_detail = {
-        #     "text_analysis": text_analysis
-        # }
         
         # 완료 처리
         await update_spring_status(post_id, "COMPLETED", 100)
-        task_status[post_id] = {"progress": 100, "status": "COMPLETED"}
         
         return text_analysis
-        # return {
-        #     "contentType": content_type,
-        #     "analysisDetail": analysis_detail,
-        #     "analyzedAt": datetime.now().isoformat()
-        # }
         
     except Exception as e:
         await update_spring_status(post_id, "FAILED", 0)
-        task_status[post_id] = {"progress": 0, "status": "FAILED"}
         raise e
 
 @app.post("/analyze/image/{post_id}")
 async def analyze_image(post_id: int, file: UploadFile = File(...)):
     try:
         # 초기 상태 설정
-        task_status[post_id] = {"progress": 0, "status": "PROCESSING"}
-        await update_spring_status(post_id, "PROCESSING", 0)
+        await update_spring_status(post_id, "START", 0)
         
-        # 이미지 읽기 (10% 진행)
+        # 이미지 읽기 (20% 진행)
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        await update_spring_status(post_id, "PROCESSING", 10)
+        await update_spring_status(post_id, "PROCESSING", 20)
         
         # 텍스트 분석 시작 (30% 진행)
-        await update_spring_status(post_id, "PROCESSING", 30)
         text_results = reader.readtext(image)
         extracted_text = ' '.join([text[1] for text in text_results])
+        await update_spring_status(post_id, "PROCESSING", 30)
         
-        # 텍스트 분석 결과 처리 (50% 진행)
-        await update_spring_status(post_id, "PROCESSING", 50)
+        # 텍스트 분석 결과 처리 (60% 진행)
         if extracted_text.strip():
             text_analysis = detect_hate_speech(extracted_text)
         else:
             text_analysis = {"error": "No text detected", "detected_texts": []}
+        await update_spring_status(post_id, "PROCESSING", 60)
         
-        # 제스처 분석 (70% 진행)
-        await update_spring_status(post_id, "PROCESSING", 70)
+        # 제스처 분석 (80% 진행)
         gesture_results = gesture_model.predict(image)
         gesture_detections = []
         
@@ -223,9 +202,9 @@ async def analyze_image(post_id: int, file: UploadFile = File(...)):
                     "gesture": result.names[int(box.cls)]
                 }
                 gesture_detections.append(gesture_detection)
+        await update_spring_status(post_id, "PROCESSING", 80)
         
         # 최종 결과 생성 (90% 진행)
-        await update_spring_status(post_id, "PROCESSING", 90)
         content_type = "IMAGE"
         analysis_detail = {
             "text_analysis": text_analysis,
@@ -234,10 +213,10 @@ async def analyze_image(post_id: int, file: UploadFile = File(...)):
                 "total_gestures": len(gesture_detections)
             }
         }
+        await update_spring_status(post_id, "PROCESSING", 90)
         
         # 완료 처리
         await update_spring_status(post_id, "COMPLETED", 100)
-        task_status[post_id] = {"progress": 100, "status": "COMPLETED"}
         
         return {
             "contentType": content_type,
@@ -247,14 +226,12 @@ async def analyze_image(post_id: int, file: UploadFile = File(...)):
         
     except Exception as e:
         await update_spring_status(post_id, "FAILED", 0)
-        task_status[post_id] = {"progress": 0, "status": "FAILED"}
         raise e
 
 @app.post("/analyze/video/{post_id}")
 async def analyze_video(post_id: int, file: UploadFile = File(...)):
     try:
         # 초기 상태 설정
-        task_status[post_id] = {"progress": 0, "status": "PROCESSING"}
         await update_spring_status(post_id, "PROCESSING", 0)
         
         # 비디오 파일 임시 저장 (10% 진행)
@@ -277,7 +254,6 @@ async def analyze_video(post_id: int, file: UploadFile = File(...)):
             # 진행률 계산 (10-90%)
             progress = 10 + (frame_count / total_frames * 80)
             await update_spring_status(post_id, "PROCESSING", progress)
-            task_status[post_id]["progress"] = progress
             
             # 프레임 분석 로직...
             text_results = reader.readtext(frame)
@@ -321,7 +297,6 @@ async def analyze_video(post_id: int, file: UploadFile = File(...)):
         
         # 완료 처리
         await update_spring_status(post_id, "COMPLETED", 100)
-        task_status[post_id] = {"progress": 100, "status": "COMPLETED"}
         
         return {
             "contentType": "VIDEO",
@@ -334,13 +309,4 @@ async def analyze_video(post_id: int, file: UploadFile = File(...)):
         
     except Exception as e:
         await update_spring_status(post_id, "FAILED", 0)
-        task_status[post_id] = {"progress": 0, "status": "FAILED"}
         raise e
-
-@app.get("/analyze/status/{post_id}")
-async def get_analysis_status(post_id: int):
-    """작업 진행 상태 확인 엔드포인트"""
-    if post_id not in task_status:
-        return {"status": "NOT_FOUND", "progress": 0}
-    return task_status[post_id]
-
