@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import easyocr
 from langdetect import detect
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, TextClassificationPipeline
 import torch
 import os
 from datetime import datetime
@@ -41,26 +41,38 @@ client = OpenAI(
 )
 
 # OCR 리더 초기화 (한글, 영어 지원)
-reader = easyocr.Reader(['ko', 'en'])
+reader = easyocr.Reader(['ko', 'en', 'ja', 'ch_sim', 'ch_tra', 'ru', 'vi', 'fr', 'hi', 'th', 'ar'])
+
+
 
 # 한국어 혐오표현 탐지 모델
-kr_tokenizer = AutoTokenizer.from_pretrained("beomi/KcELECTRA-base")
+kr_model_path = "./kr_text_detector"
+
+kr_tokenizer = AutoTokenizer.from_pretrained(kr_model_path)
 kr_model = AutoModelForSequenceClassification.from_pretrained(
-    "beomi/KcELECTRA-base",
-    num_labels=2
+    kr_model_path,
+    use_safetensors=True
 )
 
-# 영어 혐오표현 탐지 모델
-en_classifier = pipeline("text-classification", 
-                       model="facebook/roberta-hate-speech-dynabench-r4-target")
-
+kr_classification = TextClassificationPipeline(
+    model=kr_model,
+    tokenizer=kr_tokenizer,
+    device=-1,  # GPU 사용 시 0, CPU 사용 시 -1
+    return_all_scores=True
+)
 
 # 손동작 탐지 및 분류 모델
 gesture_model = YOLO('YOLOv10x_gestures.pt')
 
 
 def detect_hate_speech(text):
+    
     try:
+        language = detect(text)
+        
+        if language == "ko":
+            text = kr_classification(text)
+    
             messages = [
                 {
                 "role": "system",

@@ -59,7 +59,6 @@ temp_*
 dataset/
 data/
 *.csv
-*.json
 *.xml
 
 # Cache
@@ -71,6 +70,7 @@ htmlcov/
 # Local development settings
 local_settings.py
 yolov10/
+kr_text_detector/
 
 fastapi-env/
 fastapi-env\
