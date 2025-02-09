@@ -12,6 +12,7 @@ import httpx
 from openai import OpenAI
 from dotenv import load_dotenv
 import json
+from pytz import timezone
 
 load_dotenv()
 app = FastAPI()
@@ -65,6 +66,29 @@ kr_classification = TextClassificationPipeline(
 # 손동작 탐지 및 분류 모델
 gesture_model = YOLO('YOLOv10x_gestures.pt')
 
+async def try_all_readers(image, readers):
+    best_result = {'text': '', 'confidence': 0, 'lang': ''}
+    
+    for lang, reader in readers.items():
+        try:
+            text_results = reader.readtext(image)
+            if text_results:
+                # 모든 텍스트 결과의 평균 신뢰도 계산
+                confidence = sum(result[2] for result in text_results) / len(text_results)
+                extracted_text = ' '.join([result[1] for result in text_results])
+                
+                # 더 높은 신뢰도를 가진 결과를 저장
+                if confidence > best_result['confidence']:
+                    best_result = {
+                        'text': extracted_text,
+                        'confidence': confidence,
+                        'lang': lang
+                    }
+        except:
+            continue
+            
+    return best_result
+
 def detect_hate_speech(text):
     
     try:
@@ -73,6 +97,7 @@ def detect_hate_speech(text):
         if language == "ko":
             
             kr_result = kr_classification(text)
+            print(kr_result)
     
             messages = [
                 {
@@ -122,7 +147,7 @@ def detect_hate_speech(text):
                                 "sexual": 0~1,
                                 "sexual/minors": 0~1,
                                 "violence": 0~1,
-                                violence/graphic": 0~1,
+                                "violence/graphic": 0~1,
                             }
                         },
                         "summary":
@@ -132,7 +157,7 @@ def detect_hate_speech(text):
                             "highest_score": 최고 점수
                         },
                         "ai_analysis": "텍스트에 대한 한글 상세 분석"
-                        "analyzedAt": "대한민국 기준 현재 날짜 시 분 초"
+                        "analyzedAt": "대한민국 기준 year-month-day hour:minute:second"
                     }"""
                 },
                 {
@@ -194,7 +219,7 @@ def detect_hate_speech(text):
                                 "sexual": 0~1,
                                 "sexual/minors": 0~1,
                                 "violence": 0~1,
-                                violence/graphic": 0~1,
+                                "violence/graphic": 0~1,
                             }
                         },
                         "summary":
@@ -204,7 +229,7 @@ def detect_hate_speech(text):
                             "highest_score": 최고 점수
                         },
                         "ai_analysis": "텍스트에 대한 한글 상세 분석"
-                        "analyzedAt": "대한민국 기준 현재 날짜 시 분 초"
+                        "analyzedAt": "대한민국 기준 year-month-day hour:minute:second"
                     }"""
                 },
                 {
@@ -215,8 +240,7 @@ def detect_hate_speech(text):
                     
         response = client.chat.completions.create(
             model="sonar",
-            messages=messages,
-            temperature=0.2
+            messages=messages
             )
             
         result = response.choices[0].message.content
@@ -271,8 +295,9 @@ async def analyze_image(post_id: int, file: UploadFile = File(...)):
         await update_spring_status(post_id, "PROCESSING", 10)
         
         # 텍스트 분석 시작 (30% 진행)
-        text_results = reader.readtext(image)
-        extracted_text = ' '.join([text[1] for text in text_results])
+        result = await try_all_readers(image, readers)
+        extracted_text = result['text']
+        detected_lang = result['lang']
         await update_spring_status(post_id, "PROCESSING", 20)
         
         # 텍스트 분석 결과 처리 (50% 진행)
@@ -314,7 +339,7 @@ async def analyze_image(post_id: int, file: UploadFile = File(...)):
         return {
             "contentType": content_type,
             "analysisDetail": analysis_detail,
-            "analyzedAt": datetime.now().isoformat()
+            "analyzedAt": datetime.now(timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
         }
         
     except Exception as e:
@@ -348,19 +373,19 @@ async def analyze_video(post_id: int, file: UploadFile = File(...)):
             progress = 10 + (frame_count / total_frames * 80)
             await update_spring_status(post_id, "PROCESSING", progress)
             
-            # 프레임 분석 로직...
-            text_results = reader.readtext(frame)
-            extracted_text = ' '.join([text[1] for text in text_results])
+            # 프레임 분석 로직
+            # 텍스트 분석 시작
+            result = await try_all_readers(frame, readers)
+            extracted_text = result['text']
+            detected_lang = result['lang']
             
+            # 텍스트 분석 결과 처리
             if extracted_text.strip():
                 text_analysis = detect_hate_speech(extracted_text)
-                text_analysis["detected_texts"] = [
-                    {"text": text[1], "confidence": float(text[2])} 
-                    for text in text_results
-                ]
             else:
                 text_analysis = {"error": "No text detected", "detected_texts": []}
             
+            # 제스처 분석
             gesture_results = gesture_model.predict(frame)
             gesture_detections = []
             
