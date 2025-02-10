@@ -428,4 +428,3 @@ async def analyze_video(post_id: int, file: UploadFile = File(...)):
     except Exception as e:
         await update_spring_status(post_id, "FAILED", 0)
         raise e
-
