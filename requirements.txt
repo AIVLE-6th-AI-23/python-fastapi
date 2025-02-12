@@ -24,3 +24,4 @@ datetime
 httpx
 openai
 python-dotenv
+python-magic
