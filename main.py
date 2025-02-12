@@ -1,430 +1,212 @@
-from fastapi import FastAPI, UploadFile, File
-from ultralytics import YOLO
-import cv2
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
+from utils.status import update_spring_status, exit_status
+from utils.ocr import try_all_readers
+from utils.hate_expression import detect_hate_expression
+from utils.hate_gesture import detect_gestures
+from utils.video import analyze_video_frames
+from utils.file_download import download_file_from_url
+from utils.mime_detector import categorize_file, UnsupportedFileTypeError
+from utils.type import AnalysisCategoryResultRequestDto, ContentAnalysisRequestDto
+from typing import List
+from pydantic import BaseModel
 import numpy as np
-import easyocr
-from langdetect import detect
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, TextClassificationPipeline
-import torch
+import asyncio
 import os
-from datetime import datetime
-import httpx
-from openai import OpenAI
-from dotenv import load_dotenv
-import json
-from pytz import timezone
+import cv2
 
-load_dotenv()
 app = FastAPI()
-
-# spring boot 서버에 상태 업데이트
-async def update_spring_status(post_id: int, status: str, progress: int):
-    async with httpx.AsyncClient() as client:
-        try:
-            url = f"http://localhost:8080/{post_id}/status/{status}-{progress}"
-            await client.patch(url)
-        except Exception as e:
-            print(f"상태 업데이트 실패: {e}")
-
-# 혐오표현 언어 탐지 모델
-
-api_key = os.getenv("OPENAI_API_KEY")
-
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://api.perplexity.ai"
-)
-
-# OCR 리더 초기화 (한글, 영어 지원)
-readers = {
-    'ko': easyocr.Reader(['ko', 'en']),     # 한국어
-    'ru': easyocr.Reader(['ru', 'en']),     # 러시아어
-    'vi': easyocr.Reader(['vi', 'en']),     # 베트남어
-    'fr': easyocr.Reader(['fr', 'en']),     # 불어
-    'ja': easyocr.Reader(['ja', 'en']),     # 일본어
-    'zh': easyocr.Reader(['ch_sim', 'en']), # 중국어 간체
-    'ar': easyocr.Reader(['ar', 'en']),     # 아랍어
-    'hi': easyocr.Reader(['hi', 'en'])      # 힌디어
-}
-
-# 한국어 혐오표현 탐지 모델
-kr_model_path = "./kr_text_detector"
-
-kr_tokenizer = AutoTokenizer.from_pretrained(kr_model_path)
-kr_model = AutoModelForSequenceClassification.from_pretrained(
-    kr_model_path,
-    use_safetensors=True
-)
-
-kr_classification = TextClassificationPipeline(
-    model=kr_model,
-    tokenizer=kr_tokenizer,
-    device=-1,  # GPU 사용 시 0, CPU 사용 시 -1
-    return_all_scores=True
-)
-
-# 손동작 탐지 및 분류 모델
-gesture_model = YOLO('YOLOv10x_gestures.pt')
-
-async def try_all_readers(image, readers):
-    best_result = {'text': '', 'confidence': 0, 'lang': ''}
-    
-    for lang, reader in readers.items():
-        try:
-            text_results = reader.readtext(image)
-            if text_results:
-                # 모든 텍스트 결과의 평균 신뢰도 계산
-                confidence = sum(result[2] for result in text_results) / len(text_results)
-                extracted_text = ' '.join([result[1] for result in text_results])
-                
-                # 더 높은 신뢰도를 가진 결과를 저장
-                if confidence > best_result['confidence']:
-                    best_result = {
-                        'text': extracted_text,
-                        'confidence': confidence,
-                        'lang': lang
-                    }
-        except:
-            continue
-            
-    return best_result
-
-def detect_hate_speech(text):
-    
-    try:
-        language = detect(text)
-        
-        if language == "ko":
-            
-            kr_result = kr_classification(text)
-            print(kr_result)
-    
-            messages = [
-                {
-                "role": "system",
-                "content":
-                    """당신은 텍스트의 혐오표현을 분석하는 AI입니다.
-                    category_scores는 각 혐오 표현 종류별 확률이고
-                    단어 자체의 혐오 표현, 커뮤니티 혐오 표현, 특정 집단을 비하하거나 차별하는 표현,
-                    의미가 변질된 표현도 포함하여 텍스트를 분석하여 다음 형식의 JSON으로 응답해주세요.
-                    응답은 raw JSON이어야 하며, 마크다운이나 코드 블록을 사용하지 마세요.:
-                    {
-                    "language": "Korean",
-                        "input_text": "입력 텍스트",
-                        "text_length": 텍스트 길이,
-                        "analysis_result":
-                        {
-                            "flagged": true/false,
-                            "categories":
-                            {
-                                "hate": true/false,
-                                "hate/threatening": true/false,
-                                "hate/racial": true/false,
-                                "hate/religious": true/false,
-                                "hate/gender": true/false,
-                                "hate/sexual_orientation": true/false,
-                                "hate/disability": true/false,
-                                "hate/age": true/false,
-                                "hate/nationality": true/false,
-                                "self-harm": true/false,
-                                "sexual": true/false,
-                                "sexual/minors": true/false,
-                                "violence": true/false,
-                                "violence/graphic": true/false
-                            },
-                            "category_scores":
-                            {
-                                "hate": 0~1,
-                                "hate/threatening": 0~1,
-                                "hate/racial": 0~1,
-                                "hate/religious": 0~1,
-                                "hate/gender": 0~1,
-                                "hate/sexual_orientation": 0~1,
-                                "hate/disability": 0~1,
-                                "hate/age": 0~1,
-                                "hate/nationality": 0~1,
-                                "self-harm": 0~1,
-                                "sexual": 0~1,
-                                "sexual/minors": 0~1,
-                                "violence": 0~1,
-                                "violence/graphic": 0~1,
-                            }
-                        },
-                        "summary":
-                        {
-                            "is_toxic": true/false,
-                            "highest_category": "가장 높은 점수의 카테고리",
-                            "highest_score": 최고 점수
-                        },
-                        "ai_analysis": "텍스트에 대한 한글 상세 분석"
-                        "analyzedAt": "대한민국 기준 year-month-day hour:minute:second"
-                    }"""
-                },
-                {
-                    "role": "user",
-                    "content": f"""분석할 입력 텍스트:
-                    {text}
-                    다음은 입력 텍스트를 한국어 혐오표현 탐지 모델 처리 결과입니다:
-                    {kr_result}
-                    이 결과를 참고하여 분석해주세요."""
-                }
-            ]
-        
-        else:
-             messages = [
-                {
-                "role": "system",
-                "content":
-                    """당신은 텍스트의 혐오표현을 분석하는 AI입니다.
-                    category_scores는 각 혐오 표현 종류별 확률이고
-                    단어 자체의 혐오 표현과 커뮤니티 혐오 표현도 포함하여 텍스트를 분석하여
-                    다음 형식의 JSON으로 응답해주세요.
-                    응답은 raw JSON이어야 하며, 마크다운이나 코드 블록을 사용하지 마세요.:
-                    {
-                    "language": "언어 이름(Korean, English, Japanese, Chinese 등)",
-                        "input_text": "입력 텍스트",
-                        "text_length": 텍스트 길이,
-                        "analysis_result":
-                        {
-                            "flagged": true/false,
-                            "categories":
-                            {
-                                "hate": true/false,
-                                "hate/threatening": true/false,
-                                "hate/racial": true/false,
-                                "hate/religious": true/false,
-                                "hate/gender": true/false,
-                                "hate/sexual_orientation": true/false,
-                                "hate/disability": true/false,
-                                "hate/age": true/false,
-                                "hate/nationality": true/false,
-                                "self-harm": true/false,
-                                "sexual": true/false,
-                                "sexual/minors": true/false,
-                                "violence": true/false,
-                                "violence/graphic": true/false
-                            },
-                            "category_scores":
-                            {
-                                "hate": 0~1,
-                                "hate/threatening": 0~1,
-                                "hate/racial": 0~1,
-                                "hate/religious": 0~1,
-                                "hate/gender": 0~1,
-                                "hate/sexual_orientation": 0~1,
-                                "hate/disability": 0~1,
-                                "hate/age": 0~1,
-                                "hate/nationality": 0~1,
-                                "self-harm": 0~1,
-                                "sexual": 0~1,
-                                "sexual/minors": 0~1,
-                                "violence": 0~1,
-                                "violence/graphic": 0~1,
-                            }
-                        },
-                        "summary":
-                        {
-                            "is_toxic": true/false,
-                            "highest_category": "가장 높은 점수의 카테고리",
-                            "highest_score": 최고 점수
-                        },
-                        "ai_analysis": "텍스트에 대한 한글 상세 분석"
-                        "analyzedAt": "대한민국 기준 year-month-day hour:minute:second"
-                    }"""
-                },
-                {
-                    "role": "user",
-                    "content": text
-                }
-            ]
-                    
-        response = client.chat.completions.create(
-            model="sonar",
-            messages=messages
-            )
-            
-        result = response.choices[0].message.content
-        
-        result = result[7:-3]        
-            
-        # 정제된 문자열을 JSON으로 파싱
-        json_data = json.loads(result)
-            
-        # JSONResponse로 반환
-        return json_data
-            
-    except Exception as e:
-        return {"error": str(e), "text": text}
 
 @app.get("/test")
 async def test_connection():
-    return {"status": "success", "message": "FastAPI 서버가 정상적으로 응답했습니다."}
+    return {"status": "success", "message": "FastAPI 서버 정상 작동"}
 
-@app.post("/analyze/text/{post_id}")
-async def analyze_text(post_id: int, text: str):
-    try:
-        # 초기 상태 설정
-        await update_spring_status(post_id, "PROCESSING", 0)
-        
-        # 텍스트 분석 시작 (50% 진행)
-        await update_spring_status(post_id, "PROCESSING", 30)
-        result = detect_hate_speech(text)
-        
-        # 최종 결과 생성 (90% 진행)
-        await update_spring_status(post_id, "PROCESSING", 90)
-        
-        # 완료 처리
-        await update_spring_status(post_id, "COMPLETED", 100)
-        
-        return result
-        
-    except Exception as e:
-        await update_spring_status(post_id, "FAILED", 0)
-        raise e
+class AnalysisStartRequestDTO(BaseModel):
+    employeeId: str
+    postId: int
+    boardId: int
+    thumbnail: str
 
-@app.post("/analyze/image/{post_id}")
-async def analyze_image(post_id: int, file: UploadFile = File(...)):
+@app.post("/analyze/start")
+async def start(request: AnalysisStartRequestDTO, background_tasks: BackgroundTasks):
     try:
-        # 초기 상태 설정
-        await update_spring_status(post_id, "PROCESSING", 0)
-        
-        # 이미지 읽기 (10% 진행)
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        await update_spring_status(post_id, "PROCESSING", 10)
-        
-        # 텍스트 분석 시작 (30% 진행)
-        result = await try_all_readers(image, readers)
-        extracted_text = result['text']
-        detected_lang = result['lang']
-        await update_spring_status(post_id, "PROCESSING", 20)
-        
-        # 텍스트 분석 결과 처리 (50% 진행)
-        if extracted_text.strip():
-            text_analysis = detect_hate_speech(extracted_text)
-        else:
-            text_analysis = {"error": "No text detected", "detected_texts": []}
-        await update_spring_status(post_id, "PROCESSING", 60)
-        
-        # 제스처 분석 (70% 진행)
-        gesture_results = gesture_model.predict(image)
-        gesture_detections = []
-        
-        for result in gesture_results:
-            for box in result.boxes:
-                gesture_detection = {
-                    "bbox": box.xyxy[0].tolist(),
-                    "confidence": float(box.conf),
-                    "class": int(box.cls),
-                    "gesture": result.names[int(box.cls)]
-                }
-                gesture_detections.append(gesture_detection)
-        await update_spring_status(post_id, "PROCESSING", 80)
-        
-        # 최종 결과 생성 (90% 진행)
-        content_type = "IMAGE"
-        analysis_detail = {
-            "text_analysis": text_analysis,
-            "gesture_analysis": {
-                "detections": gesture_detections,
-                "total_gestures": len(gesture_detections)
-            }
-        }
-        await update_spring_status(post_id, "PROCESSING", 90)
-        
-        # 완료 처리
-        await update_spring_status(post_id, "COMPLETED", 100)
-        
-        return {
-            "contentType": content_type,
-            "analysisDetail": analysis_detail,
-            "analyzedAt": datetime.now(timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-    except Exception as e:
-        await update_spring_status(post_id, "FAILED", 0)
-        raise e
+        print(f"analysis start with request {request}")
+        background_tasks.add_task(analyze, request)
+        await update_spring_status(request.boardId, request.postId, "Start Analysis", 0)
+        return True
+    except Exception:
+        await update_spring_status(request.boardId, request.postId, "FAILED", 0)
+        return False
 
-@app.post("/analyze/video/{post_id}")
-async def analyze_video(post_id: int, file: UploadFile = File(...)):
+
+async def analyzeText(file_path: str, boardId: int, postId: int, employeeId: int) :
     try:
-        # 초기 상태 설정
-        await update_spring_status(post_id, "PROCESSING", 0)
+        await update_spring_status(boardId, postId, "Start Text Analysis", 10) # TODO 상태 및 progress 추가
+        await asyncio.sleep(1)        
+        # 파일 존재 여부 확인
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"파일을 찾을 수 없음: {file_path}")
         
-        # 비디오 파일 임시 저장 (10% 진행)
-        temp_file = f"temp_{file.filename}"
-        with open(temp_file, "wb") as buffer:
-            buffer.write(await file.read())
-        await update_spring_status(post_id, "PROCESSING", 10)
+        # 파일 읽어 오기
+        with open(file_path, "r", encoding="utf-8") as f:
+            text_content = f.read()
         
-        cap = cv2.VideoCapture(temp_file)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_results = []
-        frame_count = 0
+        await update_spring_status(boardId, postId, "Processing Text Analysis", 30) # TODO 상태 및 progress 추가
+        await asyncio.sleep(1)
+        # 텍스트 분석    
+        detection_result = detect_hate_expression(text_content)
         
-        # 프레임별 처리 (10-90% 진행)
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-                
-            # 진행률 계산 (10-90%)
-            progress = 10 + (frame_count / total_frames * 80)
-            await update_spring_status(post_id, "PROCESSING", progress)
-            
-            # 프레임 분석 로직
-            # 텍스트 분석 시작
-            result = await try_all_readers(frame, readers)
-            extracted_text = result['text']
-            detected_lang = result['lang']
-            
-            # 텍스트 분석 결과 처리
-            if extracted_text.strip():
-                text_analysis = detect_hate_speech(extracted_text)
-            else:
-                text_analysis = {"error": "No text detected", "detected_texts": []}
-            
-            # 제스처 분석
-            gesture_results = gesture_model.predict(frame)
-            gesture_detections = []
-            
-            for result in gesture_results:
-                for box in result.boxes:
-                    gesture_detection = {
-                        "bbox": box.xyxy[0].tolist(),
-                        "confidence": float(box.conf),
-                        "class": int(box.cls),
-                        "gesture": result.names[int(box.cls)]
-                    }
-                    gesture_detections.append(gesture_detection)
-            
-            frame_results.append({
-                "frame_number": frame_count,
-                "text_analysis": text_analysis,
-                "gesture_analysis": {
-                    "detections": gesture_detections,
-                    "total_gestures": len(gesture_detections)
-                }
-            })
-            
-            frame_count += 1
+        # 탐지 결과 전송
+        print(detection_result)
+        return detection_result
+    except Exception :
+        raise
+
+async def analyzeImage(file_path: str, boardId: int, postId: int, employeeId: int) :
+    try:
+        await update_spring_status(boardId, postId, "Start Image Analysis", 10) # TODO 상태 및 progress 추가
+        await asyncio.sleep(1)
         
-        cap.release()
-        os.remove(temp_file)
+        # 파일 존재 여부 확인
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"파일을 찾을 수 없음: {file_path}")
         
-        # 완료 처리
-        await update_spring_status(post_id, "COMPLETED", 100)
+        # 이미지 로드
+        image = cv2.imread(file_path)
+        if image is None:
+            raise ValueError("이미지를 로드할 수 없음")
+
+        await update_spring_status(boardId, postId, "Processing OCR & Text Analysis", 30)
+        await asyncio.sleep(1)
+        ##### 혐오 텍스트 감지 #####
+        # OCR
+        ocr_result = try_all_readers(image)
+        # 텍스트 분석
+        text_detection_result = []
+        text_content = ocr_result['text']
+        if not text_content.strip():
+            print("no valid ocr result")
+        else :
+            print(f"ocr result {text_content}")
+            text_detection_result = detect_hate_expression(text_content)
         
-        return {
-            "contentType": "VIDEO",
-            "analysisDetail": {
-                "total_frames": frame_count,
-                "frame_analysis": frame_results
-            },
-            "analyzedAt": datetime.now().isoformat()
-        }
         
+        await update_spring_status(boardId, postId, "Processing Image Analysis", 60) # TODO 상태 및 progress 추가
+        await asyncio.sleep(1)
+        ##### 혐오 제스처 감지 #####  
+        # 제스쳐 분석
+        gesture_detection_result = detect_gestures(image)
+        
+        
+        # 탐지 결과 병합
+        await update_spring_status(boardId, postId, "Merging Detection Results", 90) # TODO 상태 및 progress 추가
+        await asyncio.sleep(1)
+        detection_result = text_detection_result + gesture_detection_result
+        
+        # 탐지 결과 전송
+        print(detection_result)
+        return detection_result
+    except Exception :
+        raise
+    
+async def analyzeVideo(file_path: str, boardId: int, postId: int, employeeId: int) :
+    try:
+        await update_spring_status(boardId, postId, "Start Video Analysis", 10)
+        await asyncio.sleep(1)
+        # 파일 존재 여부 확인
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"파일을 찾을 수 없음: {file_path}")
+        
+        # 비디오 파일 열기
+        cap = cv2.VideoCapture(file_path)
+        if not cap.isOpened():
+            raise ValueError("비디오 파일을 열 수 없음")
+        
+        # 비디오 분석
+        detection_result = analyze_video_frames(boardId, postId, cap)
+        
+        await update_spring_status(boardId, postId, "Merging Detection Results", 90)
+        await asyncio.sleep(1)
+        
+        # 탐지 결과 전송
+        print(detection_result)
+        return detection_result
+        
+    except Exception :
+        raise
+        
+        
+        
+options = {
+    "text" : analyzeText,
+    "image" : analyzeImage,
+    "video" : analyzeVideo,
+}
+        
+async def analyze(request: AnalysisStartRequestDTO):        
+    try:
+        await update_spring_status(request.boardId, request.postId, "Start Analysis", 0)
+        
+        # Download file
+        file_path = await download_file_from_url(request.thumbnail)
+        
+        # Content Type 판단
+        file_type = categorize_file(file_path)
+        
+        # text, image, video 별 분석 실행
+        result = await options[file_type](file_path, request.boardId, request.postId)
+        
+        result_summary = ContentAnalysisRequestDto(contentType=file_type)
+        
+        # 분석 결과 처리 및 Spring boot 서버로 전송 & 알림 전송 후 종료
+        await exit_status(request.boardId, request.postId, request.employeeId, result, result_summary)         
+    except UnsupportedFileTypeError as e :
+        await update_spring_status(request.boardId, request.postId, "FAILED", 0)
+        print(f"지원되지 않는 파일 유형: {e}")
+    except FileNotFoundError as e :
+        await update_spring_status(request.boardId, request.postId, "FAILED", 0)
+        print("파일을 찾을 수 없습니다.")
     except Exception as e:
-        await update_spring_status(post_id, "FAILED", 0)
-        raise e
+        await update_spring_status(request.boardId, request.postId, "FAILED", 0)
+        print(f"Unknown Error : {e}")    
+
+class AnalysisRequest(BaseModel):
+    text: str
+
+class AnalysisResponse(BaseModel):
+    result: List[AnalysisCategoryResultRequestDto]
+    
+@app.post("/detect/text", response_model=AnalysisResponse)
+def detect_text(request: AnalysisRequest):
+    try:
+        result = detect_hate_expression(request.text)
+        return AnalysisResponse(result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/detect/image", response_model=AnalysisResponse)
+def detect_image(file: UploadFile = File(...)):
+    try:
+        image = np.frombuffer(file.file.read(), np.uint8)
+        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+        result = detect_gestures(image)
+        return AnalysisResponse(result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/detect/video", response_model=AnalysisResponse)
+async def detect_video(file: UploadFile = File(...)):
+    try:
+        video_bytes = await file.read()
+        temp_video_path = "temp_video.mp4"
+        with open(temp_video_path, "wb") as temp_video:
+            temp_video.write(video_bytes)
+        
+        cap = cv2.VideoCapture(temp_video_path)
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Invalid video file")
+        
+        result = await analyze_video_frames(0,0,cap,False)
+        os.remove(temp_video_path)
+        return AnalysisResponse(result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
