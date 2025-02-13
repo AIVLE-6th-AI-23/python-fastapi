@@ -32,7 +32,8 @@ def detect_hate_expression(text : str) -> List[AnalysisCategoryResultRequestDto]
                             다음은 입력 텍스트를 한국어 혐오 표현 탐지 모델에 처리한 결과 입니다:
                             {kr_result}
                             이 결과를 참고하여 분석해주세요.
-                            """ if not isClean else ""
+                            필수 : 최종 출력은 JSON 형식으로 출력해야합니다
+                            """ if not isClean else "필수 : 최종 출력은 JSON 형식으로 출력해야합니다"
                 
                 response = client.chat.completions.create(
                     model="sonar",
@@ -44,7 +45,7 @@ def detect_hate_expression(text : str) -> List[AnalysisCategoryResultRequestDto]
                     {
                         "role": "user",
                         "content": f"""분석할 입력 텍스트:
-                        {text}
+                        {txt}
                         {additional_info}
                         """
                     }
@@ -54,11 +55,9 @@ def detect_hate_expression(text : str) -> List[AnalysisCategoryResultRequestDto]
                 json_array = extract_json_array(result)
                 if json_array is None:
                     return []
-                print(json_array)
+                
                 parsed_result = json.loads(json_array)
-                for item in parsed_result:
-                    item["detectionMetadata"] = json.dumps(item["detectionMetadata"])
-            
+                print(parsed_result)
             else:
                 additional_info = f"""
                     다음은 입력 텍스트를 언어 감지 모델에 처리한 결과 입니다.
@@ -75,7 +74,7 @@ def detect_hate_expression(text : str) -> List[AnalysisCategoryResultRequestDto]
                     {
                         "role": "user",
                         "content": f"""분석할 입력 텍스트:
-                        {text}
+                        {txt}
                         """
                     }
                     ]
@@ -84,10 +83,9 @@ def detect_hate_expression(text : str) -> List[AnalysisCategoryResultRequestDto]
                 json_array = extract_json_array(result)
                 if json_array is None:
                     return []
-                
+                print(json_array)
                 parsed_result = json.loads(json_array)
-                for item in parsed_result:
-                    item["detectionMetadata"] = json.dumps(item["detectionMetadata"])
+                print(parsed_result)
         
             detection_results += [AnalysisCategoryResultRequestDto(**item) for item in parsed_result]        
         return detection_results

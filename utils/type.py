@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict, Any
 
 class ContentAnalysisRequestDto(BaseModel):
     contentType: str
@@ -8,7 +8,7 @@ class ContentAnalysisRequestDto(BaseModel):
 class AnalysisCategoryResultRequestDto(BaseModel):
     categoryName: str
     categoryScore: float
-    detectionMetadata: str
+    detectionMetadata: Dict[str, Any]
 
 class AnalysisRequest(BaseModel):
     contentAnalysisRequestDto: ContentAnalysisRequestDto

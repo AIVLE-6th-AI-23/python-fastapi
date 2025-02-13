@@ -28,4 +28,4 @@ def categorize_file(file_path: str) -> str:
     elif mime_type in VIDEO_MIME_TYPES or mime_type.startswith("video"):
         return "video"
     else:
-        raise UnsupportedFileTypeError(f"지원 도지 않는 파일 유형: {mime_type}")
+        raise UnsupportedFileTypeError(f"지원 되지 않는 파일 유형: {mime_type}")

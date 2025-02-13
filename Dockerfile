@@ -2,7 +2,7 @@
 FROM python:3.9-slim
 
 ENV TOKENIZERS_PARALLELISM=false
-ENV ENV_VAR=dev
+ENV ENV_VAR=
 
 # 시스템 패키지 설치
 RUN apt-get update && apt-get install -y \
@@ -27,4 +27,4 @@ COPY . .
 EXPOSE 8000
 
 # 실행 명령어
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

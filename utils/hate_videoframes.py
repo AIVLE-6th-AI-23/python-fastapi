@@ -6,8 +6,9 @@ from .status import update_spring_status
 from .type import AnalysisCategoryResultRequestDto
 from .constants import FRAME_THRESHOLD
 from typing import List
+import json
 
-async def analyze_video_frames(boardId, postId, cap, send=True) -> List[AnalysisCategoryResultRequestDto]:
+async def detect_hate_videoframes(boardId, postId, cap, send=True) -> List[AnalysisCategoryResultRequestDto]:
     try:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -21,7 +22,7 @@ async def analyze_video_frames(boardId, postId, cap, send=True) -> List[Analysis
 
             progress = 10 + (frame_count / total_frames * 80)
             print(progress)
-            if(send):
+            if send:
                 await update_spring_status(boardId, postId, "Processing Video", progress)
 
             timestamp = frame_count / fps if fps > 0 else 0 
@@ -32,25 +33,24 @@ async def analyze_video_frames(boardId, postId, cap, send=True) -> List[Analysis
             gesture_detections = detect_gestures(frame)
 
             for i, detection in enumerate(text_detections):
-                metadata = eval(detection.detectionMetadata) if detection.detectionMetadata else {}
-                metadata["frame"] = frame_count
-                metadata["timestamp"] = round(timestamp, 2)
-                text_detections[i] = detection.model_copy(update={"detectionMetadata": str(metadata)})
+                detection.detectionMetadata["frame"] = frame_count
+                detection.detectionMetadata["timestamp"] = round(timestamp, 2)
+
+                text_detections[i] = detection.model_copy(update={"detectionMetadata": detection.detectionMetadata})
 
             for i, detection in enumerate(gesture_detections):
-                metadata = eval(detection.detectionMetadata) if detection.detectionMetadata else {}
-                metadata["frame"] = frame_count
-                metadata["timestamp"] = round(timestamp, 2)
-                gesture_detections[i] = detection.model_copy(update={"detectionMetadata": str(metadata)})
+                detection.detectionMetadata["frame"] = frame_count
+                detection.detectionMetadata["timestamp"] = round(timestamp, 2)
 
+                gesture_detections[i] = detection.model_copy(update={"detectionMetadata": detection.detectionMetadata})
 
             frame_results += text_detections + gesture_detections
 
             frame_count += FRAME_THRESHOLD
-
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
         cap.release()
 
-        if(send):
+        if send:
             await update_spring_status(boardId, postId, "Video Analysis Completed", 90)
         return frame_results
 

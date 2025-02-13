@@ -1,16 +1,17 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from utils.status import update_spring_status, exit_status
-from utils.ocr import try_all_readers
-from utils.hate_expression import detect_hate_expression
 from utils.hate_gesture import detect_gestures
-from utils.video import analyze_video_frames
+from utils.hate_expression import detect_hate_expression
+from utils.hate_videoframes import detect_hate_videoframes
 from utils.file_download import download_file_from_url
 from utils.mime_detector import categorize_file, UnsupportedFileTypeError
 from utils.type import AnalysisCategoryResultRequestDto, ContentAnalysisRequestDto
 from typing import List
+from services.text_analysis import analyzeText
+from services.image_analysis import analyzeImage
+from services.video_analysis import analyzeVideo
 from pydantic import BaseModel
 import numpy as np
-import asyncio
 import os
 import cv2
 
@@ -35,106 +36,7 @@ async def start(request: AnalysisStartRequestDTO, background_tasks: BackgroundTa
         return True
     except Exception:
         await update_spring_status(request.boardId, request.postId, "FAILED", 0)
-        return False
-
-
-async def analyzeText(file_path: str, boardId: int, postId: int, employeeId: int) :
-    try:
-        await update_spring_status(boardId, postId, "Start Text Analysis", 10) # TODO 상태 및 progress 추가
-        await asyncio.sleep(1)        
-        # 파일 존재 여부 확인
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"파일을 찾을 수 없음: {file_path}")
-        
-        # 파일 읽어 오기
-        with open(file_path, "r", encoding="utf-8") as f:
-            text_content = f.read()
-        
-        await update_spring_status(boardId, postId, "Processing Text Analysis", 30) # TODO 상태 및 progress 추가
-        await asyncio.sleep(1)
-        # 텍스트 분석    
-        detection_result = detect_hate_expression(text_content)
-        
-        # 탐지 결과 전송
-        print(detection_result)
-        return detection_result
-    except Exception :
-        raise
-
-async def analyzeImage(file_path: str, boardId: int, postId: int, employeeId: int) :
-    try:
-        await update_spring_status(boardId, postId, "Start Image Analysis", 10) # TODO 상태 및 progress 추가
-        await asyncio.sleep(1)
-        
-        # 파일 존재 여부 확인
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"파일을 찾을 수 없음: {file_path}")
-        
-        # 이미지 로드
-        image = cv2.imread(file_path)
-        if image is None:
-            raise ValueError("이미지를 로드할 수 없음")
-
-        await update_spring_status(boardId, postId, "Processing OCR & Text Analysis", 30)
-        await asyncio.sleep(1)
-        ##### 혐오 텍스트 감지 #####
-        # OCR
-        ocr_result = try_all_readers(image)
-        # 텍스트 분석
-        text_detection_result = []
-        text_content = ocr_result['text']
-        if not text_content.strip():
-            print("no valid ocr result")
-        else :
-            print(f"ocr result {text_content}")
-            text_detection_result = detect_hate_expression(text_content)
-        
-        
-        await update_spring_status(boardId, postId, "Processing Image Analysis", 60) # TODO 상태 및 progress 추가
-        await asyncio.sleep(1)
-        ##### 혐오 제스처 감지 #####  
-        # 제스쳐 분석
-        gesture_detection_result = detect_gestures(image)
-        
-        
-        # 탐지 결과 병합
-        await update_spring_status(boardId, postId, "Merging Detection Results", 90) # TODO 상태 및 progress 추가
-        await asyncio.sleep(1)
-        detection_result = text_detection_result + gesture_detection_result
-        
-        # 탐지 결과 전송
-        print(detection_result)
-        return detection_result
-    except Exception :
-        raise
-    
-async def analyzeVideo(file_path: str, boardId: int, postId: int, employeeId: int) :
-    try:
-        await update_spring_status(boardId, postId, "Start Video Analysis", 10)
-        await asyncio.sleep(1)
-        # 파일 존재 여부 확인
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"파일을 찾을 수 없음: {file_path}")
-        
-        # 비디오 파일 열기
-        cap = cv2.VideoCapture(file_path)
-        if not cap.isOpened():
-            raise ValueError("비디오 파일을 열 수 없음")
-        
-        # 비디오 분석
-        detection_result = analyze_video_frames(boardId, postId, cap)
-        
-        await update_spring_status(boardId, postId, "Merging Detection Results", 90)
-        await asyncio.sleep(1)
-        
-        # 탐지 결과 전송
-        print(detection_result)
-        return detection_result
-        
-    except Exception :
-        raise
-        
-        
+        return False    
         
 options = {
     "text" : analyzeText,
@@ -155,7 +57,33 @@ async def analyze(request: AnalysisStartRequestDTO):
         # text, image, video 별 분석 실행
         result = await options[file_type](file_path, request.boardId, request.postId)
         
-        result_summary = ContentAnalysisRequestDto(contentType=file_type)
+        
+        if not result:
+            analysisSummary = """
+                    ✅ 분석 결과 해당 콘텐츠에서 혐오 표현이 감지되지 않았습니다.  
+                    해당 콘텐츠는 AI 기반 혐오 표현 분석 시스템을 통해 검토되었으며,  
+                    명백한 혐오 표현이나 공격적인 언어가 포함되지 않은 것으로 분석되었습니다.    
+
+                    콘텐츠 정책 및 내부 검수 기준에 따라 추가적인 확인이 필요할 수 있습니다.
+                    """
+        else :
+            category_counts = {}  # 카테고리별 개수 저장
+            for detection in result:
+                category = detection.categoryName
+                category_counts[category] = category_counts.get(category, 0) + 1
+
+            detected_summary = ", ".join(f"{count}건의 {category}" for category, count in category_counts.items())
+
+            analysisSummary = f"""
+                    ⚠️ 분석 결과 해당 콘텐츠에서 총 {len(result)}건의 혐오 표현이 감지되었습니다.
+                    감지된 혐오 표현 유형
+                        {detected_summary}
+                    
+                    본 분석 결과는 AI 기반 혐오 표현 탐지 시스템을 통해 자동으로 산출된 것으로 
+                    콘텐츠 정책 및 내부 검수 기준에 따라 추가적인 확인이 필요할 수 있습니다. 
+                    """
+        result_summary = ContentAnalysisRequestDto(contentType=file_type, analysisDetail=analysisSummary)
+        
         
         # 분석 결과 처리 및 Spring boot 서버로 전송 & 알림 전송 후 종료
         await exit_status(request.boardId, request.postId, request.employeeId, result, result_summary)         
@@ -167,7 +95,9 @@ async def analyze(request: AnalysisStartRequestDTO):
         print("파일을 찾을 수 없습니다.")
     except Exception as e:
         await update_spring_status(request.boardId, request.postId, "FAILED", 0)
-        print(f"Unknown Error : {e}")    
+        print(f"Unknown Error : {e}")
+    finally:
+        os.remove(file_path)    
 
 class AnalysisRequest(BaseModel):
     text: str
@@ -205,8 +135,22 @@ async def detect_video(file: UploadFile = File(...)):
         if not cap.isOpened():
             raise HTTPException(status_code=400, detail="Invalid video file")
         
-        result = await analyze_video_frames(0,0,cap,False)
+        result = await detect_hate_videoframes(0,0,cap,False)
         os.remove(temp_video_path)
         return AnalysisResponse(result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/test/api/status")
+async def testApi(boardId: int, postId: int,status:str ,progress:int):
+    try:
+        await update_spring_status(boardId,postId,status,progress)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/test/api/status/exit")
+async def testApiexit(boardId: int, postId: int,employeeId: str):
+    try:
+        await exit_status(boardId,postId, employeeId, [], ContentAnalysisRequestDto(contentType="unknown", analysisDetail="empty"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

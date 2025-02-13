@@ -1,7 +1,7 @@
 from models import load_gesture_model
 from .type import AnalysisCategoryResultRequestDto
+from .constants import GESTURE_TO_ISO
 from typing import List
-import json
 from .constants import DETECTABLE_HATE_GESTURES
 
 gesture_model = None
@@ -25,15 +25,17 @@ def detect_gestures(image) -> List[AnalysisCategoryResultRequestDto]:
             area_ratio = (width * height) / (image.shape[0] * image.shape[1])
             print(image.shape)
             print(area_ratio)
+            category = result.names[int(box.cls)].strip("'")
             
-            detection = AnalysisCategoryResultRequestDto(
-                categoryName=result.names[int(box.cls)],
-                categoryScore=float(box.conf),
-                detectionMetadata=json.dumps({
-                    "bbox" : str(box.xyxy[0].tolist())
-                })
-            )
-            if detection.categoryName not in DETECTABLE_HATE_GESTURES:
+            if category in DETECTABLE_HATE_GESTURES:
+                detection = AnalysisCategoryResultRequestDto(
+                    categoryName=category,
+                    categoryScore=float(box.conf),
+                    detectionMetadata={
+                        "bbox": bbox,                    
+                        "countries": GESTURE_TO_ISO[category] 
+                    }
+                )
                 detections.append(detection.model_copy())
             else :
                 print(detection)
